@@ -30,9 +30,7 @@ use Redis;
  */
 class RedisCache extends CacheProvider
 {
-    /**
-     * @var Redis|null
-     */
+    /** @var Redis|null */
     private $redis;
 
     /**
@@ -74,12 +72,14 @@ class RedisCache extends CacheProvider
         $fetchedItems = array_combine($keys, $this->redis->mget($keys));
 
         // Redis mget returns false for keys that do not exist. So we need to filter those out unless it's the real data.
-        $foundItems   = array();
+        $foundItems = [];
 
         foreach ($fetchedItems as $key => $value) {
-            if (false !== $value || $this->redis->exists($key)) {
-                $foundItems[$key] = $value;
+            if ($value === false && ! $this->redis->exists($key)) {
+                continue;
             }
+
+            $foundItems[$key] = $value;
         }
 
         return $foundItems;
@@ -95,9 +95,11 @@ class RedisCache extends CacheProvider
 
             // Keys have lifetime, use SETEX for each of them
             foreach ($keysAndValues as $key => $value) {
-                if (!$this->redis->setex($key, $lifetime, $value)) {
-                    $success = false;
+                if ($this->redis->setex($key, $lifetime, $value)) {
+                    continue;
                 }
+
+                $success = false;
             }
 
             return $success;
@@ -112,7 +114,13 @@ class RedisCache extends CacheProvider
      */
     protected function doContains($id)
     {
-        return $this->redis->exists($id);
+        $exists = $this->redis->exists($id);
+
+        if (is_bool($exists)) {
+            return $exists;
+        }
+
+        return $exists > 0;
     }
 
     /**
@@ -138,6 +146,14 @@ class RedisCache extends CacheProvider
     /**
      * {@inheritdoc}
      */
+    protected function doDeleteMultiple(array $keys)
+    {
+        return $this->redis->delete($keys) >= 0;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     protected function doFlush()
     {
         return $this->redis->flushDB();
@@ -149,13 +165,13 @@ class RedisCache extends CacheProvider
     protected function doGetStats()
     {
         $info = $this->redis->info();
-        return array(
+        return [
             Cache::STATS_HITS   => $info['keyspace_hits'],
             Cache::STATS_MISSES => $info['keyspace_misses'],
             Cache::STATS_UPTIME => $info['uptime_in_seconds'],
             Cache::STATS_MEMORY_USAGE      => $info['used_memory'],
-            Cache::STATS_MEMORY_AVAILABLE  => false
-        );
+            Cache::STATS_MEMORY_AVAILABLE  => false,
+        ];
     }
 
     /**
